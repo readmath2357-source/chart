@@ -53,7 +53,8 @@ h3{font-size:14px;margin:16px 0 4px;color:var(--dim);font-weight:600}
 #toasts{position:fixed;right:12px;bottom:12px;z-index:30;display:flex;flex-direction:column;gap:8px;max-width:min(360px,calc(100vw - 24px))}
 .toast{background:#1d2433;border:1px solid #2f3a52;border-left:3px solid var(--acc);border-radius:8px;padding:10px 12px;font-size:13px;white-space:pre-wrap;box-shadow:0 6px 20px #0006}
 #diag{display:none;position:absolute;left:50%;top:40px;transform:translateX(-50%);z-index:6;width:min(440px,calc(100% - 24px));background:#1d2433;border:1px solid #5a2f35;border-radius:8px;padding:12px 14px;font-size:13px;line-height:1.6}#diag small{color:var(--dim)}
-.sty{display:grid;grid-template-columns:minmax(0,1fr) 52px 76px 76px;gap:6px;align-items:center;margin:6px 0;font-size:13px}
+.sty.look{grid-template-columns:minmax(0,1fr) 52px}
+.sty{display:grid;grid-template-columns:minmax(0,1fr) 48px 68px 60px;gap:6px;align-items:center;margin:6px 0;font-size:13px}
 .sty.hd{color:var(--dim);font-size:12px;margin-bottom:0}
 .sty input[type=color]{padding:3px;cursor:pointer}
 .sty select{padding:0 6px}
@@ -134,9 +135,11 @@ input[type=checkbox]{width:20px;height:20px;padding:0;accent-color:var(--acc)}
     <div><label for="sHi">RSI 과매수선</label><input id="sHi" type="number" min="50" max="100"></div>
     <div><label for="sLo">RSI 과매도선</label><input id="sLo" type="number" min="0" max="50"></div>
   </div>
+  <h3>차트 모양 (바꾸면 바로 적용)</h3>
+  <div id="lookBox"></div>
   <h3>지표 표시 (바꾸면 바로 적용)</h3>
   <div id="styBox"></div>
-  <div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" id="styReset">표시 기본값으로</button></div>
+  <div class="acts" style="justify-content:flex-start;margin-top:8px"><button class="btn" id="styReset">모양·표시 기본값으로</button></div>
   <h3>텔레그램 알림</h3>
   <label for="sTok">봇 토큰</label><input id="sTok" autocomplete="off" placeholder="123456789:AA...">
   <label for="sChat">채팅 ID</label><input id="sChat" autocomplete="off" placeholder="숫자">
@@ -174,12 +177,14 @@ const LS = {
   set(k, v) { try { localStorage.setItem('ethc_' + k, JSON.stringify(v)); } catch (e) {} }
 };
 const DEF_STY = {
-  fish: { color: '#3d7bfd', width: 2, style: 0 }, trig: { color: '#ff8a3d', width: 1, style: 0 }, rsi: { color: '#a77bf3', width: 2, style: 0 },
+  fish: { show: true, color: '#3d7bfd', width: 2, style: 0 }, trig: { show: true, color: '#ff8a3d', width: 1, style: 0 }, rsi: { show: true, color: '#a77bf3', width: 2, style: 0 },
   fg: { show: true, color: '#3a4152', style: 2 }, rg: { show: true, color: '#3a4152', style: 2 }
 };
 const mergeSty = s => Object.fromEntries(Object.keys(DEF_STY).map(k => [k, { ...DEF_STY[k], ...((s || {})[k] || {}) }]));
 const S = Object.assign({ tf: '1h', fisherLen: 20, rsiLen: 20, rsiHi: 70, rsiLo: 30, tgToken: '', tgChat: '', color: COLORS[0], v: 0 }, LS.get('settings', {}));
+const DEF_LOOK = { bg: '#0f1218', up: '#26a69a', dn: '#ef5350', grid: true };
 S.sty = mergeSty(S.sty);
+S.look = { ...DEF_LOOK, ...(S.look || {}) };
 if (S.v < 2) { S.fisherLen = 20; S.rsiLen = 20; S.v = 2; }
 let drawings = LS.get('drawings', []);
 let alerts = LS.get('alerts', []);
@@ -359,7 +364,7 @@ const chart = LC.createChart($('chart'), {
   localization: { locale: 'ko-KR' }
 });
 const candle = chart.addSeries(LC.CandlestickSeries, { upColor: '#26a69a', downColor: '#ef5350', borderVisible: false, wickUpColor: '#26a69a', wickDownColor: '#ef5350', priceFormat: { type: 'price', precision: 2, minMove: 0.01 } }, 0);
-const lineOpt = o => ({ color: o.color, lineWidth: o.width, lineStyle: o.style, priceLineVisible: false, lastValueVisible: true, crosshairMarkerRadius: 3, priceFormat: { type: 'price', precision: 2, minMove: 0.01 } });
+const lineOpt = o => ({ color: o.color, lineWidth: o.width, lineStyle: o.style, visible: o.show !== false, priceLineVisible: false, lastValueVisible: true, crosshairMarkerRadius: 3, priceFormat: { type: 'price', precision: 2, minMove: 0.01 } });
 const fishS = chart.addSeries(LC.LineSeries, lineOpt(S.sty.fish), 1);
 const trigS = chart.addSeries(LC.LineSeries, lineOpt(S.sty.trig), 1);
 const rsiS = chart.addSeries(LC.LineSeries, lineOpt(S.sty.rsi), 2);
@@ -367,16 +372,27 @@ let guides = [];
 function setGuides() {
   guides.forEach(([s, l]) => s.removePriceLine(l)); guides = [];
   const add = (s, price, g) => { if (g.show) guides.push([s, s.createPriceLine({ price, color: g.color, lineWidth: 1, lineStyle: g.style, axisLabelVisible: false })]); };
-  [1.5, 0.75, 0, -0.75, -1.5].forEach(p => add(fishS, p, S.sty.fg));
+  add(fishS, 0, S.sty.fg);
   [S.rsiHi, 50, S.rsiLo].forEach(p => add(rsiS, p, S.sty.rg));
 }
 function applyStyles() {
-  const o = k => ({ color: S.sty[k].color, lineWidth: S.sty[k].width, lineStyle: S.sty[k].style });
+  const o = k => ({ color: S.sty[k].color, lineWidth: S.sty[k].width, lineStyle: S.sty[k].style, visible: S.sty[k].show });
   fishS.applyOptions(o('fish')); trigS.applyOptions(o('trig')); rsiS.applyOptions(o('rsi'));
   setGuides();
   if (cf && cf.ready) { const I = cf.ind(); setLabels(I, cf.bars.length - 1); }
 }
 setGuides();
+const lum = h => { const n = parseInt(h.slice(1), 16); return (0.299 * (n >> 16 & 255) + 0.587 * (n >> 8 & 255) + 0.114 * (n & 255)) / 255; };
+function applyLook() {
+  const L = S.look, light = lum(L.bg) > 0.6, gc = light ? '#e9ecf2' : '#161b24';
+  chart.applyOptions({
+    layout: { background: { type: 'solid', color: L.bg }, textColor: light ? '#4a5163' : '#8a93a6', panes: { separatorColor: light ? '#d3d8e2' : '#232833' } },
+    grid: { vertLines: { visible: L.grid, color: gc }, horzLines: { visible: L.grid, color: gc } }
+  });
+  candle.applyOptions({ upColor: L.up, downColor: L.dn, wickUpColor: L.up, wickDownColor: L.dn });
+  wrap.style.background = L.bg;
+}
+applyLook();
 try { const p = chart.panes(); p[0].setStretchFactor(3); p[1].setStretchFactor(1); p[2].setStretchFactor(1); } catch (e) {}
 
 let cf = null; // 차트가 보고 있는 피드
@@ -691,17 +707,23 @@ $('openList').onclick = () => { renderList(); openModal('mList'); };
 $('openSet').onclick = () => {
   $('sFl').value = S.fisherLen; $('sRl').value = S.rsiLen; $('sHi').value = S.rsiHi; $('sLo').value = S.rsiLo;
   $('sTok').value = S.tgToken; $('sChat').value = S.tgChat; $('tgRes').textContent = '';
-  fillSty(); openModal('mSet');
+  fillSty(); fillLook(); openModal('mSet');
 };
-const STY_ROWS = [['fish', 'Fisher'], ['trig', 'Fisher 시그널'], ['rsi', 'RSI'], ['fg', 'Fisher 기준선'], ['rg', 'RSI 기준선']];
+const STY_ROWS = [['fish', 'Fisher'], ['trig', 'Fisher 시그널'], ['fg', 'Fisher 0선'], ['rsi', 'RSI'], ['rg', 'RSI 기준선']];
 const STYLES = [[0, '실선'], [1, '점선'], [2, '파선']];
-$('styBox').innerHTML = '<div class="sty hd"><span></span><span>색</span><span>모양</span><span>굵기/표시</span></div>' + STY_ROWS.map(([k, n]) =>
-  `<div class="sty"><span>${n}</span><input type="color" id="sc_${k}" aria-label="${n} 색"><select id="ss_${k}" aria-label="${n} 모양">${STYLES.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>` +
-  ('width' in DEF_STY[k] ? `<select id="sw_${k}" aria-label="${n} 굵기">${[1, 2, 3, 4].map(w => `<option value="${w}">${w}</option>`).join('')}</select>` : `<label class="chk"><input type="checkbox" id="sh_${k}"> 표시</label>`) + '</div>').join('');
-function fillSty() { for (const [k] of STY_ROWS) { const o = S.sty[k]; $('sc_' + k).value = o.color; $('ss_' + k).value = o.style; if ('width' in o) $('sw_' + k).value = o.width; else $('sh_' + k).checked = o.show; } }
-function readSty() { for (const [k] of STY_ROWS) { const o = S.sty[k]; o.color = $('sc_' + k).value; o.style = +$('ss_' + k).value; if ('width' in o) o.width = +$('sw_' + k).value; else o.show = $('sh_' + k).checked; } }
+$('styBox').innerHTML = '<div class="sty hd"><span>표시</span><span>색</span><span>모양</span><span>굵기</span></div>' + STY_ROWS.map(([k, n]) =>
+  `<div class="sty"><label class="chk"><input type="checkbox" id="sh_${k}"> ${n}</label><input type="color" id="sc_${k}" aria-label="${n} 색"><select id="ss_${k}" aria-label="${n} 모양">${STYLES.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select>` +
+  ('width' in DEF_STY[k] ? `<select id="sw_${k}" aria-label="${n} 굵기">${[1, 2, 3, 4].map(w => `<option value="${w}">${w}</option>`).join('')}</select>` : '<span></span>') + '</div>').join('');
+function fillSty() { for (const [k] of STY_ROWS) { const o = S.sty[k]; $('sh_' + k).checked = o.show; $('sc_' + k).value = o.color; $('ss_' + k).value = o.style; if ('width' in o) $('sw_' + k).value = o.width; } }
+function readSty() { for (const [k] of STY_ROWS) { const o = S.sty[k]; o.show = $('sh_' + k).checked; o.color = $('sc_' + k).value; o.style = +$('ss_' + k).value; if ('width' in o) o.width = +$('sw_' + k).value; } }
 $('styBox').addEventListener('input', () => { readSty(); applyStyles(); saveAll(); });
-$('styReset').onclick = () => { S.sty = mergeSty({}); fillSty(); applyStyles(); saveAll(); };
+const LOOK_ROWS = [['bg', '배경색'], ['up', '상승봉 색'], ['dn', '하락봉 색']];
+$('lookBox').innerHTML = LOOK_ROWS.map(([k, n]) => `<div class="sty look"><span>${n}</span><input type="color" id="lc_${k}" aria-label="${n}"></div>`).join('') +
+  '<div class="sty look"><label class="chk"><input type="checkbox" id="lc_grid"> 격자선 표시</label></div>';
+function fillLook() { for (const [k] of LOOK_ROWS) $('lc_' + k).value = S.look[k]; $('lc_grid').checked = S.look.grid; }
+function readLook() { for (const [k] of LOOK_ROWS) S.look[k] = $('lc_' + k).value; S.look.grid = $('lc_grid').checked; }
+$('lookBox').addEventListener('input', () => { readLook(); applyLook(); saveAll(); });
+$('styReset').onclick = () => { S.sty = mergeSty({}); S.look = { ...DEF_LOOK }; fillSty(); fillLook(); applyStyles(); applyLook(); saveAll(); };
 const clampInt = (v, lo, hi, d) => { v = parseInt(v, 10); return isNaN(v) ? d : Math.max(lo, Math.min(hi, v)); };
 function readSet() {
   S.fisherLen = clampInt($('sFl').value, 2, 200, 9); S.rsiLen = clampInt($('sRl').value, 2, 200, 14);
